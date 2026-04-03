@@ -1,103 +1,85 @@
 package com.deeptrade.app
 
-import kotlin.math.floor
+import android.app.Activity
+import android.graphics.Color
+import android.os.Bundle
+import android.view.Gravity
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.Switch
+import android.widget.TextView
+import android.widget.Toast
 
-// 1. 定义数据结构
-data class HoldRecord(
-    val symbol: String, 
-    val buyPrice: Double, 
-    var amount: Double, 
-    val initialTargetPrice: Double, 
-    val initialStopLossPrice: Double, 
-    var highestPriceSinceBuy: Double 
-)
+class MainActivity : Activity() {
 
-// 2. 所需接口
-interface BrokerApi {
-    suspend fun getAccountBalance(): Double
-    suspend fun buyStock(symbol: String, amount: Double, price: Double): Boolean
-    suspend fun sellStock(symbol: String, amount: Double, price: Double): Boolean
-    suspend fun getTransactionFee(amount: Double, price: Double): Double
-    suspend fun getCurrentPrice(symbol: String): Double
-}
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-interface DeepSeekAnalyzer {
-    suspend fun analyzeAndPickStocks(marketData: String): List<HoldRecord>
-}
-
-interface NotificationService {
-    fun sendPushNotification(title: String, message: String)
-}
-
-// 3. AI 交易引擎核心 (包含熔断、移动止盈、资金分配)
-class AutoTradeEngine(
-    private val realBroker: BrokerApi,
-    private val mockBroker: BrokerApi,
-    private val aiAnalyzer: DeepSeekAnalyzer,
-    private val notifier: NotificationService
-) {
-    var isPaperTrading: Boolean = true // 默认开启模拟盘
-    var isKillSwitchActive: Boolean = false // 熔断开关
-
-    private val activeBroker: BrokerApi
-        get() = if (isPaperTrading) mockBroker else realBroker
-
-    // 一键熔断清仓
-    suspend fun triggerKillSwitch(holdings: MutableList<HoldRecord>) {
-        isKillSwitchActive = true
-        notifier.sendPushNotification("⚠️ 警告", "触发一键熔断！正尝试清仓...")
-        val iterator = holdings.iterator()
-        while (iterator.hasNext()) {
-            val hold = iterator.next()
-            val currentPrice = activeBroker.getCurrentPrice(hold.symbol)
-            if (activeBroker.sellStock(hold.symbol, hold.amount, currentPrice)) {
-                iterator.remove()
-            }
+        // 1. 创建整体垂直布局 (暗黑风格)
+        val mainLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(60, 60, 60, 60)
+            setBackgroundColor(Color.parseColor("#121212")) // 极客黑背景
         }
-    }
 
-    // 选股与资金均分买入
-    suspend fun startTradingCycle(marketData: String) {
-        if (isKillSwitchActive) return
-        val totalBalance = activeBroker.getAccountBalance()
-        val top3Stocks = aiAnalyzer.analyzeAndPickStocks(marketData)
-        
-        // 留10%现金，剩下资金分配给3只股票
-        val allocationPerStock = (totalBalance * 0.9) / 3.0
-        
-        top3Stocks.forEach { stock ->
-            val currentPrice = activeBroker.getCurrentPrice(stock.symbol)
-            val affordShares = floor(allocationPerStock / currentPrice)
-            if (affordShares > 0 && activeBroker.buyStock(stock.symbol, affordShares, currentPrice)) {
-                notifier.sendPushNotification("✅ 买入", "买入 ${stock.symbol}, 数量: $affordShares")
-            }
+        // 2. 软件标题
+        val titleView = TextView(this).apply {
+            text = "DeepTrade AI 自动交易系统"
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 80)
         }
-    }
+        mainLayout.addView(titleView)
 
-    // 监控与移动止盈
-    suspend fun monitorAndSell(holdings: MutableList<HoldRecord>) {
-        if (isKillSwitchActive) return
-        val iterator = holdings.iterator()
-        while (iterator.hasNext()) {
-            val hold = iterator.next()
-            val currentPrice = activeBroker.getCurrentPrice(hold.symbol)
+        // 3. 模拟盘 / 实盘 切换开关 (建议3 集成)
+        val modeSwitch = Switch(this).apply {
+            text = "当前模式：模拟盘 (资金安全)"
+            setTextColor(Color.GREEN)
+            textSize = 18f
+            isChecked = true // 默认在左侧模拟盘模式
+            setPadding(0, 0, 0, 60)
             
-            if (currentPrice > hold.highestPriceSinceBuy) {
-                hold.highestPriceSinceBuy = currentPrice
-            }
-
-            val fee = activeBroker.getTransactionFee(hold.amount, currentPrice)
-            val netProfit = (currentPrice - hold.buyPrice) * hold.amount - fee
-            val trailingStopPrice = hold.highestPriceSinceBuy * 0.95 // 最高点回撤5%
-
-            if (currentPrice <= hold.initialStopLossPrice || 
-               (hold.highestPriceSinceBuy >= hold.initialTargetPrice && currentPrice <= trailingStopPrice && netProfit > 0)) {
-                
-                if (activeBroker.sellStock(hold.symbol, hold.amount, currentPrice)) {
-                    notifier.sendPushNotification("💰 卖出", "卖出 ${hold.symbol}, 净利润: $netProfit")
-                    iterator.remove()
+            setOnCheckedChangeListener { _, isChecked ->
+                if (isChecked) {
+                    text = "当前模式：模拟盘 (资金安全)"
+                    setTextColor(Color.GREEN)
+                } else {
+                    text = "当前模式：🚨 实盘交易 (危险)"
+                    setTextColor(Color.RED)
+                    Toast.makeText(context, "警告：已切入实盘，AI将动用真实资金！", Toast.LENGTH_LONG).show()
                 }
             }
         }
+        mainLayout.addView(modeSwitch)
+
+        // 4. 系统运行状态文字
+        val statusView = TextView(this).apply {
+            text = "系统状态：AI 正在监控市场...\n\n当前总资产：$0.00\n今日收益：$0.00\n持仓数量：0只"
+            textSize = 16f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, 0, 0, 100)
+        }
+        mainLayout.addView(statusView)
+
+        // 5. 巨大的【一键熔断】按钮 (建议1 集成)
+        val killSwitchBtn = Button(this).apply {
+            text = "🚨 一键熔断清仓 🚨"
+            setBackgroundColor(Color.RED)
+            setTextColor(Color.WHITE)
+            textSize = 22f
+            setPadding(40, 40, 40, 40)
+            
+            setOnClickListener {
+                // 点击后触发熔断报警
+                Toast.makeText(context, "已触发熔断！正在强平所有仓位...", Toast.LENGTH_LONG).show()
+                statusView.text = "系统状态：🛑 熔断已激活，停止所有买入！"
+                statusView.setTextColor(Color.RED)
+            }
+        }
+        mainLayout.addView(killSwitchBtn)
+
+        // 将拼接好的界面显示到屏幕上
+        setContentView(mainLayout)
     }
 }
